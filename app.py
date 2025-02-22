@@ -9,7 +9,7 @@ import os, random, string, sys, datetime
 # Load environment variables
 load_dotenv()
 
-app = Flask(_name_)
+app = Flask(__name__)
 oauth = OAuth(app)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Allow CORS for WebSocket
 
