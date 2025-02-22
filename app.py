@@ -1,5 +1,5 @@
-from flask import Flask, url_for, redirect, request, render_template, session, jsonify
-from flask_socketio import SocketIO, join_room, leave_room, send, emit
+from flask import Flask, url_for, redirect, request, jsonify, session
+from flask_socketio import SocketIO, join_room, emit
 from pymongo import MongoClient
 from authlib.integrations.flask_client import OAuth
 from flask_cors import CORS
@@ -17,7 +17,7 @@ app.secret_key = os.getenv('RANDOM_KEY')
 
 try:
     client = MongoClient(os.getenv('MONGO_URI'))
-except pymongo.errors.ConfigurationError:
+except:
     print("Invalid MongoDB URI. Check your Atlas connection string.")
     sys.exit(1)
 
@@ -46,7 +46,7 @@ def generate_code():
 @app.route('/')
 def home():
     if not session.get('auth'):
-        return "home"  # Change this to render_template("index.html") when ready
+        return "home"
     return redirect('/TeamRegistration')
 
 @app.route('/google')
@@ -72,76 +72,68 @@ def authorize_google():
     session['username'] = user_info.get("given_name")
     return redirect('/TeamRegistration')
 
-@app.route('/TeamRegistration', methods=['POST', 'GET'])
+@app.route('/TeamRegistration', methods=['POST'])
 def team_registration():
-    data = request.json
-
-    # Extracting form data
-    #name = data.get('teamName')
-    #slogan = data.get('teamSlogan')
-    #user_name = data.get('userName')
-    #bio = data.get('shortBio')
-
     if not session.get('auth'):
-        return redirect('/')
+        return jsonify({"error": "Unauthorized"}), 401  # Return JSON instead of redirect
 
-    if request.method == 'POST':
-        team_name =data.get('teamName')
-        slogan = data.get("teamSlogan")
-        bio = data.get("shortBio")
+    data = request.json
+    team_name = data.get('teamName')
+    slogan = data.get("teamSlogan")
+    bio = data.get("shortBio")
 
-        # Check if team name already exists
-        if teamdb.find_one({'team_name': team_name}):
-            message = "Team name already exists"
-            return render_template("TeamRegistration.html", message=message)
+    # Check if team name already exists
+    if teamdb.find_one({'team_name': team_name}):
+        return jsonify({"error": "Team name already exists"}), 400
 
-        # Generate a unique team code
-        teamcode = generate_code()
+    # Generate a unique team code
+    teamcode = generate_code()
 
-        # Insert team details into the database
-        teamdb.insert_one({
-            "Admin": session['email'],
-            "username": session['username'],
-            "team_name": team_name,
-            "teamcode": teamcode,
-            "teamSlogan": slogan,
-            "teamBio": bio,
-        })
+    # Insert team details into the database
+    teamdb.insert_one({
+        "Admin": session['email'],
+        "username": session['username'],
+        "team_name": team_name,
+        "teamcode": teamcode,
+        "teamSlogan": slogan,
+        "teamBio": bio,
+    })
 
-        return redirect(f'/community/{team_name}')  # Redirect to the chatroom
+    return jsonify({"message": "Team registered successfully!", "team_name": team_name}), 201
 
-    return "Done"  # Change this to render_template('TeamRegistration.html') when ready
+@app.route('/joinTeam', methods=['POST'])
+def join_team():
+    if not session.get('auth'):
+        return jsonify({"error": "Unauthorized"}), 401
 
-@app.route('/joinTeam',methods=['POST'])
-def jointeam():
-    if request.method=='POST':
-        teamcode=request.form.get('teamcode')
-    exisitingTeamcode=teamdb.find_one({'teamcode':teamcode})
-    if exisitingTeamcode:
-        return redirect('/community/<team_name>')
-    message="*No teams found"
-    return render_template('/joinTeam',message=message)
+    data = request.json
+    teamcode = data.get('teamcode')
+
+    existing_team = teamdb.find_one({'teamcode': teamcode})
+
+    if existing_team:
+        return jsonify({"message": "Joined team successfully!", "team_name": existing_team['team_name']}), 200
+    else:
+        return jsonify({"error": "No teams found"}), 404
 
 @app.route('/community/<team_name>')
 def room(team_name):
     if not session.get('auth'):
         return redirect('/')
 
-    # Fetch team data based on team_name
     room_data = teamdb.find_one({"team_name": team_name})
-    
+
     if not room_data:
         return redirect('/TeamRegistration')
 
-    teamcode = room_data['teamcode']  # Get teamcode
-    room_messages = chat.find({"teamcode": teamcode}).sort("timestamp", 1)  # Fetch messages for the team
+    teamcode = room_data['teamcode']
+    room_messages = list(chat.find({"teamcode": teamcode}).sort("timestamp", 1))
 
-    return render_template('app.html', 
-                           roomcode=teamcode, 
-                           roomname=room_data, 
-                           room_messages=room_messages, 
-                           title=team_name 
-                           )
+    return jsonify({
+        "teamcode": teamcode,
+        "team_name": team_name,
+        "messages": room_messages
+    })
 
 @socketio.on('join')
 def handle_join(data):
@@ -155,21 +147,18 @@ def handle_message(data):
     email = session.get('email')
 
     if not email:
-        return 
+        return
     user_data = users.find_one({"email": email})
     if not user_data:
         return
-    
-    username = user_data.get("username")  
 
-    # Fetch the team details to get the team name
-    team_data = teamdb.find_one({"teamcode": room})  
+    username = user_data.get("username")
+    team_data = teamdb.find_one({"teamcode": room})
     if not team_data:
         return
 
-    team_name = team_data.get("team_name") 
+    team_name = team_data.get("team_name")
 
-    # Insert message into the database
     message_data = {
         "teamcode": room,
         "team_name": team_name,
