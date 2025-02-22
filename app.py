@@ -86,9 +86,9 @@ def team_registration():
         return redirect('/')
 
     if request.method == 'POST':
-        team_name = request.form.get('teamName')
-        slogan = request.form.get("TeamSlogan")
-        bio = request.form.get("ShortBio")
+        team_name =data.get('teamName')
+        slogan = data.get("teamSlogan")
+        bio = data.get("shortBio")
 
         # Check if team name already exists
         if teamdb.find_one({'team_name': team_name}):
