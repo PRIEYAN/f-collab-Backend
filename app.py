@@ -186,5 +186,5 @@ def logout():
     session.clear()
     return redirect('/')
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     socketio.run(app, debug=True, port=5050)
