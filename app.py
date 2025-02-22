@@ -1,4 +1,4 @@
-from flask import Flask, url_for, redirect, request, render_template, session
+from flask import Flask, url_for, redirect, request, render_template, session, jsonify
 from flask_socketio import SocketIO, join_room, leave_room, send, emit
 from pymongo import MongoClient
 from authlib.integrations.flask_client import OAuth
@@ -9,7 +9,7 @@ import os, random, string, sys, datetime
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(_name_)
 oauth = OAuth(app)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Allow CORS for WebSocket
 
@@ -74,13 +74,21 @@ def authorize_google():
 
 @app.route('/TeamRegistration', methods=['POST', 'GET'])
 def team_registration():
+    data = request.json
+
+    # Extracting form data
+    #name = data.get('teamName')
+    #slogan = data.get('teamSlogan')
+    #user_name = data.get('userName')
+    #bio = data.get('shortBio')
+
     if not session.get('auth'):
         return redirect('/')
 
     if request.method == 'POST':
         team_name = request.form.get('teamName')
-        slogan = request.form.get("slogan")
-        bio = request.form.get("bio")
+        slogan = request.form.get("TeamSlogan")
+        bio = request.form.get("ShortBio")
 
         # Check if team name already exists
         if teamdb.find_one({'team_name': team_name}):
@@ -178,5 +186,5 @@ def logout():
     session.clear()
     return redirect('/')
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     socketio.run(app, debug=True, port=5050)
