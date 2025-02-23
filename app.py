@@ -77,13 +77,11 @@ def authorize_google():
 
 @app.route('/TeamRegistration', methods=['POST'])
 def team_registration():
-    if not session.get('auth'):
-        return jsonify({"error": "Unauthorized"}), 401  # Return JSON instead of redirect
 
     data = request.json
     team_name = data.get('teamName')
-    slogan = data.get("teamSlogan")
-    bio = data.get("shortBio")
+    slogan = data.get("slogan")
+    bio = data.get("bio")
 
     # Check if team name already exists
     if teamdb.find_one({'team_name': team_name}):
