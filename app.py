@@ -91,8 +91,8 @@ def team_registration():
 
     # Insert team details into the database
     teamdb.insert_one({
-        "Admin": session['email'],
-        "username": session['username'],
+        "Admin": "haiii",#session['email'],
+        "username": "Raakesh,"#session['username'],
         "team_name": team_name,
         "teamcode": teamcode,
         "teamSlogan": slogan,
