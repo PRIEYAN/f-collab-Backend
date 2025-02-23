@@ -1,6 +1,6 @@
 from flask import Flask, url_for, redirect, request, jsonify, session
 from flask_socketio import SocketIO, join_room, emit
-from pymongo import MongoClient
+from flask_sqlalchemy import SQLAlchemy
 from authlib.integrations.flask_client import OAuth
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -14,23 +14,35 @@ oauth = OAuth(app)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Allow CORS for WebSocket
 CORS(app)
 
-
-
 app.secret_key = os.getenv('RANDOM_KEY')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-try:
-    client = MongoClient(os.getenv('MONGO_URI'))
-except:
-    print("Invalid MongoDB URI. Check your Atlas connection string.")
-    sys.exit(1)
+db = SQLAlchemy(app)
 
-# Database
-db = client.get_database('mydatabase')
-users = db.users
-teamdb = db.teamdb
-chat = db.messages
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
 
-CORS(app)
+class Team(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    admin_email = db.Column(db.String(120), nullable=False)
+    username = db.Column(db.String(80), nullable=False)
+    team_name = db.Column(db.String(120), unique=True, nullable=False)
+    teamcode = db.Column(db.String(6), unique=True, nullable=False)
+    teamSlogan = db.Column(db.String(255))
+    teamBio = db.Column(db.Text)
+
+class Message(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    teamcode = db.Column(db.String(6), nullable=False)
+    team_name = db.Column(db.String(120), nullable=False)
+    username = db.Column(db.String(80), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+db.create_all()
 
 google = oauth.register(
     name='google',
@@ -64,11 +76,10 @@ def authorize_google():
     user_info = resp.json()
     email = user_info.get("email")
 
-    if not users.find_one({"email": email}):
-        users.insert_one({
-            "username": user_info.get("given_name"),
-            "email": email,
-        })
+    if not User.query.filter_by(email=email).first():
+        new_user = User(username=user_info.get("given_name"), email=email)
+        db.session.add(new_user)
+        db.session.commit()
 
     session['auth'] = True
     session['email'] = email
@@ -77,28 +88,18 @@ def authorize_google():
 
 @app.route('/TeamRegistration', methods=['POST'])
 def team_registration():
-
     data = request.json
     team_name = data.get('teamName')
     slogan = data.get("slogan")
     bio = data.get("bio")
 
-    # Check if team name already exists
-    if teamdb.find_one({'team_name': team_name}):
+    if Team.query.filter_by(team_name=team_name).first():
         return jsonify({"error": "Team name already exists"}), 400
 
-    # Generate a unique team code
     teamcode = generate_code()
-
-    # Insert team details into the database
-    teamdb.insert_one({
-        "Admin": "haiii",#session['email'],
-        "username": "Raakesh",#session['username'],
-        "team_name": team_name,
-        "teamcode": teamcode,
-        "teamSlogan": slogan,
-        "teamBio": bio,
-    })
+    new_team = Team(admin_email=session['email'], username=session['username'], team_name=team_name, teamcode=teamcode, teamSlogan=slogan, teamBio=bio)
+    db.session.add(new_team)
+    db.session.commit()
 
     return jsonify({"message": "Team registered successfully!", "team_name": team_name}), 201
 
@@ -109,11 +110,10 @@ def join_team():
 
     data = request.json
     teamcode = data.get('teamcode')
-
-    existing_team = teamdb.find_one({'teamcode': teamcode})
+    existing_team = Team.query.filter_by(teamcode=teamcode).first()
 
     if existing_team:
-        return jsonify({"message": "Joined team successfully!", "team_name": existing_team['team_name']}), 200
+        return jsonify({"message": "Joined team successfully!", "team_name": existing_team.team_name}), 200
     else:
         return jsonify({"error": "No teams found"}), 404
 
@@ -122,18 +122,19 @@ def room(team_name):
     if not session.get('auth'):
         return redirect('/')
 
-    room_data = teamdb.find_one({"team_name": team_name})
+    room_data = Team.query.filter_by(team_name=team_name).first()
 
     if not room_data:
         return redirect('/TeamRegistration')
 
-    teamcode = room_data['teamcode']
-    room_messages = list(chat.find({"teamcode": teamcode}).sort("timestamp", 1))
+    teamcode = room_data.teamcode
+    room_messages = Message.query.filter_by(teamcode=teamcode).order_by(Message.timestamp.asc()).all()
+    messages = [{"username": m.username, "message": m.message, "timestamp": m.timestamp} for m in room_messages]
 
     return jsonify({
         "teamcode": teamcode,
         "team_name": team_name,
-        "messages": room_messages
+        "messages": messages
     })
 
 @socketio.on('join')
@@ -149,27 +150,19 @@ def handle_message(data):
 
     if not email:
         return
-    user_data = users.find_one({"email": email})
-    if not user_data:
+    user = User.query.filter_by(email=email).first()
+    if not user:
         return
 
-    username = user_data.get("username")
-    team_data = teamdb.find_one({"teamcode": room})
-    if not team_data:
+    team = Team.query.filter_by(teamcode=room).first()
+    if not team:
         return
 
-    team_name = team_data.get("team_name")
+    new_message = Message(teamcode=room, team_name=team.team_name, username=user.username, message=message)
+    db.session.add(new_message)
+    db.session.commit()
 
-    message_data = {
-        "teamcode": room,
-        "team_name": team_name,
-        "username": username,
-        "message": message,
-        "timestamp": datetime.datetime.utcnow()
-    }
-    chat.insert_one(message_data)
-
-    emit('receive_message', {'username': username, 'message': message}, room=room)
+    emit('receive_message', {'username': user.username, 'message': message}, room=room)
 
 @app.route('/logout')
 def logout():
