@@ -10,8 +10,9 @@ import os, random, string, sys, datetime
 load_dotenv()
 
 app = Flask(__name__)
-oauth = OAuth(app)
-socketio = SocketIO(app, cors_allowed_origins="*")  # Allow CORS for WebSocket
+oauth = OAuth(app) # Allow CORS for WebSocket
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
+
 
 app.secret_key = os.getenv('RANDOM_KEY')
 
